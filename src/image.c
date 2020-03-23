@@ -239,11 +239,19 @@ image **load_alphabet()
 void draw_detections(image im, detection *dets, int num, float thresh, char **names, image **alphabet, int classes)
 {
     int i,j;
+    printf("[\n");
 
     for(i = 0; i < num; ++i){
         char labelstr[4096] = {0};
         char str2float[8] = {0};
         int class = -1;
+
+        typedef struct {
+            char *name;
+            float confidence;
+        } classConfidence;
+        classConfidence relevantClasses[classes];
+        int numberOfRelevantClasses = 0;
         for(j = 0; j < classes; ++j){
             if (dets[i].prob[j] > thresh){
                 if (class < 0) {
@@ -257,9 +265,39 @@ void draw_detections(image im, detection *dets, int num, float thresh, char **na
                     sprintf(str2float," %.0f%%",(dets[i].prob[j])*100+0.5f);
                     strcat(labelstr, str2float);
                 }
-                printf("%s: %.0f%%\n", names[j], dets[i].prob[j]*100);
+
+                relevantClasses[numberOfRelevantClasses].name = names[j];
+                relevantClasses[numberOfRelevantClasses].confidence = dets[i].prob[j];
+                numberOfRelevantClasses++;
             }
         }
+
+        box b = dets[i].bbox;
+        printf("\t{\n");
+        printf("\t\t\"classes\":[");
+        for (int k = 0; k < numberOfRelevantClasses; k++) {
+            printf("{\n");
+            printf("\t\t\t\"class\": \"%s\",\n", relevantClasses[k].name);
+            printf("\t\t\t\"confidence\": %f\n", relevantClasses[k].confidence);
+            printf("\t\t}");
+            if (k < (numberOfRelevantClasses-1)) {
+                printf(",");
+            }
+        }
+        printf("],\n");
+        printf("\t\t\"left\": %f,\n", (b.x-b.w/2.)*im.w);
+        printf("\t\t\"top\": %f,\n", (b.y-b.h/2.)*im.h);
+        printf("\t\t\"right\": %f,\n", (b.x+b.w/2.)*im.w);
+        printf("\t\t\"bottom\": %f\n", (b.y+b.h/2.)*im.h);
+        printf("\t}");
+        if (i < (num-1)) {
+            printf(",\n");
+        } else {
+            printf("\n");
+        }
+
+        
+
         if(class >= 0){
             int width = im.h * .006;
 
@@ -312,6 +350,7 @@ void draw_detections(image im, detection *dets, int num, float thresh, char **na
             }
         }
     }
+     printf("]\n");
 }
 
 void transpose_image(image im)
@@ -993,85 +1032,85 @@ void letterbox_image_into(image im, int w, int h, image boxed)
 
 #ifdef NNPACK
 struct resize_image_params {
-	image im;
-	image resized;
-	image part;
-	int w;
-	int h;
+    image im;
+    image resized;
+    image part;
+    int w;
+    int h;
 };
 
 void resize_image_compute_w(struct resize_image_params *params, size_t k, size_t r)
 {
-	int c;
-	float w_scale = (float)(params->im.w - 1) / (params->w - 1);
+    int c;
+    float w_scale = (float)(params->im.w - 1) / (params->w - 1);
 
-	for(c = 0; c < params->w; ++c){
-		float val = 0;
-		if(c == params->w-1 || params->im.w == 1){
-			val = get_pixel(params->im, params->im.w-1, r, k);
-		} else {
-			float sx = c*w_scale;
-			int ix = (int) sx;
-			float dx = sx - ix;
-			val = (1 - dx) * get_pixel(params->im, ix, r, k) + dx * get_pixel(params->im, ix+1, r, k);
-		}
-		set_pixel(params->part, c, r, k, val);
-	}
+    for(c = 0; c < params->w; ++c){
+        float val = 0;
+        if(c == params->w-1 || params->im.w == 1){
+            val = get_pixel(params->im, params->im.w-1, r, k);
+        } else {
+            float sx = c*w_scale;
+            int ix = (int) sx;
+            float dx = sx - ix;
+            val = (1 - dx) * get_pixel(params->im, ix, r, k) + dx * get_pixel(params->im, ix+1, r, k);
+        }
+        set_pixel(params->part, c, r, k, val);
+    }
 }
 
 void resize_image_compute_h(struct resize_image_params *params, size_t k, size_t r)
 {
-	int c;
-	float h_scale = (float)(params->im.h - 1) / (params->h - 1);
+    int c;
+    float h_scale = (float)(params->im.h - 1) / (params->h - 1);
 
-	float sy = r*h_scale;
-	int iy = (int) sy;
-	float dy = sy - iy;
-	for(c = 0; c < params->w; ++c){
-		float val = (1-dy) * get_pixel(params->part, c, iy, k);
-		set_pixel(params->resized, c, r, k, val);
-	}
-	if(r == params->h-1 || params->im.h == 1) return;
-	for(c = 0; c < params->w; ++c){
-		float val = dy * get_pixel(params->part, c, iy+1, k);
-		add_pixel(params->resized, c, r, k, val);
-	}
+    float sy = r*h_scale;
+    int iy = (int) sy;
+    float dy = sy - iy;
+    for(c = 0; c < params->w; ++c){
+        float val = (1-dy) * get_pixel(params->part, c, iy, k);
+        set_pixel(params->resized, c, r, k, val);
+    }
+    if(r == params->h-1 || params->im.h == 1) return;
+    for(c = 0; c < params->w; ++c){
+        float val = dy * get_pixel(params->part, c, iy+1, k);
+        add_pixel(params->resized, c, r, k, val);
+    }
 }
 
 image resize_image_thread(image im, int w, int h, pthreadpool_t threadpool)
 {
-	image resized = make_image(w, h, im.c);
-	image part = make_image(w, im.h, im.c);
+    image resized = make_image(w, h, im.c);
+    image part = make_image(w, im.h, im.c);
 
-	struct resize_image_params params = { im, resized, part, w, h };
-	pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)resize_image_compute_w,
-		&params, im.c, im.h);
-	pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)resize_image_compute_h,
-		&params, im.c, h);
+    struct resize_image_params params = { im, resized, part, w, h };
+    pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)resize_image_compute_w,
+        &params, im.c, im.h);
+    pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)resize_image_compute_h,
+        &params, im.c, h);
 
-	free_image(part);
-	return resized;
+    free_image(part);
+    return resized;
 }
 
 image letterbox_image_thread(image im, int w, int h, pthreadpool_t threadpool)
 {
-	int new_w = im.w;
-	int new_h = im.h;
-	if (((float)w/im.w) < ((float)h/im.h)) {
-		new_w = w;
-		new_h = (im.h * w)/im.w;
-	} else {
-		new_h = h;
-		new_w = (im.w * h)/im.h;
-	}
-	image resized = resize_image_thread(im, new_w, new_h, threadpool);
-	image boxed = make_image(w, h, im.c);
-	fill_image(boxed, .5);
-	//int i;
-	//for(i = 0; i < boxed.w*boxed.h*boxed.c; ++i) boxed.data[i] = 0;
-	embed_image(resized, boxed, (w-new_w)/2, (h-new_h)/2);
-	free_image(resized);
-	return boxed;
+    int new_w = im.w;
+    int new_h = im.h;
+    if (((float)w/im.w) < ((float)h/im.h)) {
+        new_w = w;
+        new_h = (im.h * w)/im.w;
+    } else {
+        new_h = h;
+        new_w = (im.w * h)/im.h;
+    }
+    image resized = resize_image_thread(im, new_w, new_h, threadpool);
+    image boxed = make_image(w, h, im.c);
+    fill_image(boxed, .5);
+    //int i;
+    //for(i = 0; i < boxed.w*boxed.h*boxed.c; ++i) boxed.data[i] = 0;
+    embed_image(resized, boxed, (w-new_w)/2, (h-new_h)/2);
+    free_image(resized);
+    return boxed;
 }
 #endif
 
@@ -1557,39 +1596,39 @@ void test_resize(char *filename)
 
 #ifdef NNPACK
 struct load_image_params {
-	image im;
-	unsigned char *data;
-	int w;
-	int h;
-	int c;
+    image im;
+    unsigned char *data;
+    int w;
+    int h;
+    int c;
 };
 
 void load_image_compute(struct load_image_params *params, size_t k, size_t j)
 {
-	int i;
-	for(i = 0; i < params->w; ++i){
-		int dst_index = i + params->w*j + params->w*params->h*k;
-		int src_index = k + params->c*i + params->c*params->w*j;
-		params->im.data[dst_index] = (float)params->data[src_index]/255.;
-	}
+    int i;
+    for(i = 0; i < params->w; ++i){
+        int dst_index = i + params->w*j + params->w*params->h*k;
+        int src_index = k + params->c*i + params->c*params->w*j;
+        params->im.data[dst_index] = (float)params->data[src_index]/255.;
+    }
 }
 
 image load_image_stb_thread(char *filename, int channels, pthreadpool_t threadpool)
 {
-	int w, h, c;
-	unsigned char *data = stbi_load(filename, &w, &h, &c, channels);
-	if (!data) {
-		fprintf(stderr, "Cannot load image \"%s\"\nSTB Reason: %s\n", filename, stbi_failure_reason());
-		exit(0);
-	}
+    int w, h, c;
+    unsigned char *data = stbi_load(filename, &w, &h, &c, channels);
+    if (!data) {
+        fprintf(stderr, "Cannot load image \"%s\"\nSTB Reason: %s\n", filename, stbi_failure_reason());
+        exit(0);
+    }
 
-	if(channels) c = channels;
-	image im = make_image(w, h, c);
-	struct load_image_params params = { im, data, w, h, c };
-	pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)load_image_compute,
-		&params, c, h);
-	free(data);
-	return im;
+    if(channels) c = channels;
+    image im = make_image(w, h, c);
+    struct load_image_params params = { im, data, w, h, c };
+    pthreadpool_compute_2d(threadpool, (pthreadpool_function_2d_t)load_image_compute,
+        &params, c, h);
+    free(data);
+    return im;
 }
 #endif
 
@@ -1603,7 +1642,7 @@ image load_image_stb(char *filename, int channels)
     }
     if(channels) c = channels;
     int i,j,k;
-	image im = make_image(w, h, c);
+    image im = make_image(w, h, c);
     for(k = 0; k < c; ++k){
         for(j = 0; j < h; ++j){
             for(i = 0; i < w; ++i){
@@ -1612,7 +1651,7 @@ image load_image_stb(char *filename, int channels)
                 im.data[dst_index] = (float)data[src_index]/255.;
             }
         }
-	}
+    }
     free(data);
     return im;
 }
@@ -1636,7 +1675,7 @@ image load_image(char *filename, int w, int h, int c)
 #ifdef NNPACK
 image load_image_thread(char *filename, int w, int h, int c, pthreadpool_t threadpool)
 {
-	return load_image_stb_thread(filename, c, threadpool);
+    return load_image_stb_thread(filename, c, threadpool);
 }
 #endif
 
